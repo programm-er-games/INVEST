@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
     app_env: str = "development"
     app_secret_key: str = "development-only-change-me"
@@ -14,6 +15,9 @@ class Settings(BaseSettings):
 
     @property
     def allowed_target_list(self) -> set[str]:
-        return {x.strip().rstrip("/") for x in self.allowed_targets.split(",") if x.strip()}
+        return {
+            x.strip().rstrip("/") for x in self.allowed_targets.split(",") if x.strip()
+        }
+
 
 settings = Settings()

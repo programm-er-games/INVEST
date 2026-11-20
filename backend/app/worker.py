@@ -1,4 +1,5 @@
 """Dedicated worker process for durable workflow execution."""
+
 import logging
 from app.queue import run_worker
 

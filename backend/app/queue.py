@@ -3,6 +3,7 @@
 Rows in `runs` are the queue. FOR UPDATE SKIP LOCKED makes claiming safe
 across multiple worker processes without an external broker.
 """
+
 import logging
 import os
 import socket
@@ -100,7 +101,14 @@ def _findings_from_result(result: dict) -> list[dict]:
             if fingerprint:
                 explanations[str(fingerprint)] = explanation
     return [
-        {**finding, **({"ai_explanation": explanations[str(finding["fingerprint"])]} if str(finding.get("fingerprint")) in explanations else {})}
+        {
+            **finding,
+            **(
+                {"ai_explanation": explanations[str(finding["fingerprint"])]}
+                if str(finding.get("fingerprint")) in explanations
+                else {}
+            ),
+        }
         for finding in unique.values()
     ]
 
@@ -111,9 +119,13 @@ def process_run(run_id: str, worker_id: str) -> None:
         if run is None or run.status not in {"running", "cancelling"} or run.locked_by != worker_id:
             return
         graph_snapshot = run.graph_snapshot
-        state_rows = session.scalars(
-            select(FindingState).where(FindingState.workflow_id == run.workflow_id)
-        ).all() if run.workflow_id else []
+        state_rows = (
+            session.scalars(
+                select(FindingState).where(FindingState.workflow_id == run.workflow_id)
+            ).all()
+            if run.workflow_id
+            else []
+        )
         finding_states = {
             row.fingerprint: {
                 "state": row.state,
@@ -171,13 +183,21 @@ def process_run(run_id: str, worker_id: str) -> None:
                             WorkflowRun.status.in_(["running", "cancelling"]),
                             WorkflowRun.locked_by == worker_id,
                         )
-                        .values(result=snapshot, heartbeat_at=datetime.now(timezone.utc))
+                        .values(
+                            result=snapshot, heartbeat_at=datetime.now(timezone.utc)
+                        )
                     )
                     progress_session.commit()
             except Exception:
                 logger.exception("Could not persist progress for run %s", run_id)
 
+<<<<<<< Updated upstream
         result = execute_graph(graph, registry, on_progress=report_progress, finding_states=finding_states, should_cancel=is_cancel_requested, target_node_ids=target_node_ids, cache_entries=cache_entries, force_full_scan=force_full_scan, force_node_ids=force_node_ids, cache_metadata=cache_metadata)
+=======
+        result = execute_graph(
+            graph, registry, on_progress=report_progress, finding_states=finding_states
+        )
+>>>>>>> Stashed changes
         final_status = result.get("status", "failed")
         error = None
     except Exception as exc:
@@ -185,7 +205,11 @@ def process_run(run_id: str, worker_id: str) -> None:
         result = {"status": "failed", "error": "Workflow execution failed"}
         final_status = "failed"
         # Keep details in server logs, not in a public API response.
-        error = str(exc)[:1000] if isinstance(exc, WorkflowExecutionError) else "Internal execution error"
+        error = (
+            str(exc)[:1000]
+            if isinstance(exc, WorkflowExecutionError)
+            else "Internal execution error"
+        )
     finally:
         stop.set()
         heartbeat.join(timeout=2)
@@ -227,19 +251,21 @@ def process_run(run_id: str, worker_id: str) -> None:
                         else "Находка повторно обнаружена сканером после статуса fixed."
                     )
                     lifecycle.expires_at = None
-                    session.add(AuditLog(
-                        action="finding.state.reopened",
-                        entity="finding_state",
-                        entity_id=f"{run.workflow_id}:{lifecycle.fingerprint}",
-                        details={
-                            "workflow_id": str(run.workflow_id),
-                            "fingerprint": lifecycle.fingerprint,
-                            "previous_state": previous_state,
-                            "new_state": "open",
-                            "reason": lifecycle.reason,
-                            "run_id": str(run.id),
-                        },
-                    ))
+                    session.add(
+                        AuditLog(
+                            action="finding.state.reopened",
+                            entity="finding_state",
+                            entity_id=f"{run.workflow_id}:{lifecycle.fingerprint}",
+                            details={
+                                "workflow_id": str(run.workflow_id),
+                                "fingerprint": lifecycle.fingerprint,
+                                "previous_state": previous_state,
+                                "new_state": "open",
+                                "reason": lifecycle.reason,
+                                "run_id": str(run.id),
+                            },
+                        )
+                    )
         for finding in findings:
             session.add(
                 Finding(
@@ -253,7 +279,12 @@ def process_run(run_id: str, worker_id: str) -> None:
                 )
             )
         session.commit()
-    logger.info("Run %s finished with status=%s findings=%d", run_id, final_status, len(findings))
+    logger.info(
+        "Run %s finished with status=%s findings=%d",
+        run_id,
+        final_status,
+        len(findings),
+    )
 
 
 def run_worker(poll_interval: float = 2.0) -> None:

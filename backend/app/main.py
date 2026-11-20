@@ -27,11 +27,20 @@ from app.sources.run_files import RunSourceFileError, resolve_run_source_file
 from app.scanners.presentation import _redact
 from app.security.redaction import redact_text
 from app.db import SessionLocal
-from app.models import AuditLog, Finding, FindingState, Project, Workflow, WorkflowRun, WorkflowVersion
+from app.models import (
+    AuditLog,
+    Finding,
+    FindingState,
+    Project,
+    Workflow,
+    WorkflowRun,
+    WorkflowVersion,
+)
 from app.workflows.registry import registry
 from app.workflows.schemas import WorkflowGraph
 from app.workflows.validator import validate_graph
 from app.workflows.engine import CACHE_TTL_SECONDS, execute_graph, WorkflowExecutionError
+
 
 class ProjectRename(BaseModel):
     name: str = Field(min_length=1, max_length=200)
@@ -117,8 +126,9 @@ def upload_source(file: UploadFile = File(...)):
     except ArchiveValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except OSError as exc:
-        raise HTTPException(status_code=500, detail="Не удалось сохранить архив в рабочую директорию.") from exc
-
+        raise HTTPException(
+            status_code=500, detail="Не удалось сохранить архив в рабочую директорию."
+        ) from exc
 
 
 def _project_root(project: Project) -> Path:
@@ -131,28 +141,41 @@ def _project_root(project: Project) -> Path:
         or not relative.parts[1].startswith("project-")
         or any(part in {"", ".", ".."} for part in relative.parts)
     ):
-        raise HTTPException(status_code=500, detail="Invalid project workspace reference")
+        raise HTTPException(
+            status_code=500, detail="Invalid project workspace reference"
+        )
     root = workspace.joinpath(*relative.parts)
     if root.is_symlink():
         raise HTTPException(status_code=404, detail="Project files are unavailable")
     try:
         resolved = root.resolve(strict=True)
     except OSError as exc:
-        raise HTTPException(status_code=404, detail="Project files are unavailable") from exc
+        raise HTTPException(
+            status_code=404, detail="Project files are unavailable"
+        ) from exc
     if not resolved.is_relative_to(workspace) or not resolved.is_dir():
         raise HTTPException(status_code=404, detail="Project files are unavailable")
     return resolved
 
 
 def _project_has_active_run(session, project: Project) -> bool:
+<<<<<<< Updated upstream
     runs = session.scalars(select(WorkflowRun).where(WorkflowRun.status.in_(["queued", "running", "cancelling"]))).all()
+=======
+    runs = session.scalars(
+        select(WorkflowRun).where(WorkflowRun.status.in_(["queued", "running"]))
+    ).all()
+>>>>>>> Stashed changes
     for run in runs:
         graph = run.graph_snapshot if isinstance(run.graph_snapshot, dict) else {}
         for node in graph.get("nodes", []):
             if not isinstance(node, dict) or node.get("type") != "source.upload":
                 continue
             config = node.get("config", {})
-            if isinstance(config, dict) and config.get("path") == project.workspace_path:
+            if (
+                isinstance(config, dict)
+                and config.get("path") == project.workspace_path
+            ):
                 return True
     return False
 
@@ -176,18 +199,21 @@ def _safe_project_name(filename: str | None) -> str:
     return (cleaned or "Новый проект")[:200]
 
 
-
-
 def _project_path_is_sensitive(relative: PurePosixPath) -> bool:
     blocked = ("secret", "credential", "password", "token", "private", ".env")
     return any(token in part.lower() for part in relative.parts for token in blocked)
 
 
 def _project_content_is_safe(content: str) -> bool:
-    assignment = re.compile(r"(?i)\b(?:password|passwd|api[_-]?(?:key|token)|access[_-]?token|client[_-]?secret|secret|authorization|token)\b\s*[:=]\s*[\"']?[^,\s\"'#]{8,}")
+    assignment = re.compile(
+        r"(?i)\b(?:password|passwd|api[_-]?(?:key|token)|access[_-]?token|client[_-]?secret|secret|authorization|token)\b\s*[:=]\s*[\"']?[^,\s\"'#]{8,}"
+    )
     if "-----BEGIN " in content and "PRIVATE KEY-----" in content:
         return False
-    return all(_redact(line) == line and not assignment.search(line) for line in content.splitlines())
+    return all(
+        _redact(line) == line and not assignment.search(line)
+        for line in content.splitlines()
+    )
 
 
 PROJECT_EXPORT_TEXT_SUFFIXES = {
@@ -213,7 +239,8 @@ def _project_file_snapshot(root: Path) -> dict[str, dict[str, int | str]]:
     manifest: dict[str, dict[str, int | str]] = {}
     for current, directories, filenames in os.walk(root, followlinks=False):
         directories[:] = sorted(
-            name for name in directories
+            name
+            for name in directories
             if name != ".git" and not (Path(current) / name).is_symlink()
         )
         for filename in sorted(filenames):
@@ -229,7 +256,10 @@ def _project_file_snapshot(root: Path) -> dict[str, dict[str, int | str]]:
                 with item.open("rb") as source:
                     for chunk in iter(lambda: source.read(1024 * 1024), b""):
                         digest.update(chunk)
-                manifest[relative] = {"size": stat.st_size, "sha256": digest.hexdigest()}
+                manifest[relative] = {
+                    "size": stat.st_size,
+                    "sha256": digest.hexdigest(),
+                }
             except OSError:
                 continue
     return manifest
@@ -240,8 +270,7 @@ def _project_snapshot_diff(before: dict, after: dict) -> dict:
     added = sorted(new_paths - old_paths)
     removed = sorted(old_paths - new_paths)
     changed = sorted(
-        path for path in old_paths & new_paths
-        if before[path] != after[path]
+        path for path in old_paths & new_paths if before[path] != after[path]
     )
     return {
         "added_count": len(added),
@@ -258,7 +287,9 @@ def _project_snapshot_diff(before: dict, after: dict) -> dict:
 @app.get("/api/projects")
 def list_projects():
     with SessionLocal() as session:
-        rows = session.scalars(select(Project).order_by(Project.updated_at.desc(), Project.name)).all()
+        rows = session.scalars(
+            select(Project).order_by(Project.updated_at.desc(), Project.name)
+        ).all()
         return [_project_payload(item) for item in rows]
 
 
@@ -270,7 +301,9 @@ def create_project(file: UploadFile = File(...)):
     workspace_path = f"projects/project-{project_id}"
     staging_path = f"projects/.staging-{project_id}"
     try:
-        result = extract_project_archive(file.file, settings.workspace_root, staging_path)
+        result = extract_project_archive(
+            file.file, settings.workspace_root, staging_path
+        )
         root = Path(settings.workspace_root).resolve()
         destination = root / workspace_path
         result_path = root / staging_path
@@ -285,9 +318,17 @@ def create_project(file: UploadFile = File(...)):
                 expanded_bytes=result["expanded_bytes"],
             )
             session.add(project)
-            session.add(AuditLog(action="project.created", entity="project", entity_id=str(project_id), details={
-                "file_count": result["files"], "expanded_bytes": result["expanded_bytes"]
-            }))
+            session.add(
+                AuditLog(
+                    action="project.created",
+                    entity="project",
+                    entity_id=str(project_id),
+                    details={
+                        "file_count": result["files"],
+                        "expanded_bytes": result["expanded_bytes"],
+                    },
+                )
+            )
             session.commit()
             session.refresh(project)
             return _project_payload(project)
@@ -295,7 +336,9 @@ def create_project(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except OSError as exc:
         shutil.rmtree(Path(settings.workspace_root) / staging_path, ignore_errors=True)
-        raise HTTPException(status_code=500, detail="Не удалось сохранить проект в рабочую папку.") from exc
+        raise HTTPException(
+            status_code=500, detail="Не удалось сохранить проект в рабочую папку."
+        ) from exc
     finally:
         file.file.close()
 
@@ -309,7 +352,10 @@ def update_project_archive(project_id: UUID, file: UploadFile = File(...)):
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
         if _project_has_active_run(session, project):
-            raise HTTPException(status_code=409, detail="Нельзя обновить проект, пока выполняется workflow с этим источником.")
+            raise HTTPException(
+                status_code=409,
+                detail="Нельзя обновить проект, пока выполняется workflow с этим источником.",
+            )
         workspace_path = project.workspace_path
         staging_path = f"projects/.staging-{project_id}-{uuid4().hex}"
         root = Path(settings.workspace_root).resolve()
@@ -331,10 +377,18 @@ def update_project_archive(project_id: UUID, file: UploadFile = File(...)):
             project.file_count = result["files"]
             project.expanded_bytes = result["expanded_bytes"]
             project.original_filename = Path(file.filename).name[:255]
-            session.add(AuditLog(action="project.updated", entity="project", entity_id=str(project_id), details={
-                "file_count": result["files"], "expanded_bytes": result["expanded_bytes"],
-                "changes": changes,
-            }))
+            session.add(
+                AuditLog(
+                    action="project.updated",
+                    entity="project",
+                    entity_id=str(project_id),
+                    details={
+                        "file_count": result["files"],
+                        "expanded_bytes": result["expanded_bytes"],
+                        "changes": changes,
+                    },
+                )
+            )
             session.commit()
             session.refresh(project)
             return _project_payload(project)
@@ -342,7 +396,9 @@ def update_project_archive(project_id: UUID, file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except OSError as exc:
             shutil.rmtree(staging, ignore_errors=True)
-            raise HTTPException(status_code=500, detail="Не удалось обновить файлы проекта.") from exc
+            raise HTTPException(
+                status_code=500, detail="Не удалось обновить файлы проекта."
+            ) from exc
         finally:
             file.file.close()
 
@@ -355,9 +411,14 @@ def rename_project(project_id: UUID, payload: ProjectRename):
             raise HTTPException(status_code=404, detail="Project not found")
         previous = project.name
         project.name = payload.name
-        session.add(AuditLog(action="project.renamed", entity="project", entity_id=str(project_id), details={
-            "previous_name": previous, "name": payload.name
-        }))
+        session.add(
+            AuditLog(
+                action="project.renamed",
+                entity="project",
+                entity_id=str(project_id),
+                details={"previous_name": previous, "name": payload.name},
+            )
+        )
         session.commit()
         session.refresh(project)
         return _project_payload(project)
@@ -370,16 +431,26 @@ def delete_project(project_id: UUID):
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
         if _project_has_active_run(session, project):
-            raise HTTPException(status_code=409, detail="Нельзя удалить проект, пока выполняется workflow с этим источником.")
+            raise HTTPException(
+                status_code=409,
+                detail="Нельзя удалить проект, пока выполняется workflow с этим источником.",
+            )
         root = _project_root(project)
         shutil.rmtree(root)
-        session.add(AuditLog(action="project.deleted", entity="project", entity_id=str(project_id), details={
-            "name": project.name, "workspace_path": project.workspace_path
-        }))
+        session.add(
+            AuditLog(
+                action="project.deleted",
+                entity="project",
+                entity_id=str(project_id),
+                details={
+                    "name": project.name,
+                    "workspace_path": project.workspace_path,
+                },
+            )
+        )
         session.delete(project)
         session.commit()
     return None
-
 
 
 @app.get("/api/projects/{project_id}/history")
@@ -412,8 +483,14 @@ def list_project_files(project_id: UUID):
             raise HTTPException(status_code=404, detail="Project not found")
         root = _project_root(project)
         files = []
-        for current, directories, filenames in __import__("os").walk(root, followlinks=False):
-            directories[:] = [name for name in directories if name != ".git" and not (Path(current) / name).is_symlink()]
+        for current, directories, filenames in __import__("os").walk(
+            root, followlinks=False
+        ):
+            directories[:] = [
+                name
+                for name in directories
+                if name != ".git" and not (Path(current) / name).is_symlink()
+            ]
             for filename in filenames:
                 item = Path(current) / filename
                 if item.is_symlink():
@@ -427,8 +504,11 @@ def list_project_files(project_id: UUID):
                     break
             if len(files) >= 10000:
                 break
-        return {"project": _project_payload(project), "files": sorted(files, key=lambda item: item["path"].lower()), "truncated": len(files) >= 10000}
-
+        return {
+            "project": _project_payload(project),
+            "files": sorted(files, key=lambda item: item["path"].lower()),
+            "truncated": len(files) >= 10000,
+        }
 
 
 class ProjectFileUpdate(BaseModel):
@@ -442,7 +522,12 @@ def preview_project_file(
     start_line: int = Query(default=1, ge=1),
 ):
     relative = PurePosixPath(path)
-    if relative.is_absolute() or "\\" in path or "\x00" in path or any(part in {"", ".", ".."} for part in relative.parts):
+    if (
+        relative.is_absolute()
+        or "\\" in path
+        or "\x00" in path
+        or any(part in {"", ".", ".."} for part in relative.parts)
+    ):
         raise HTTPException(status_code=400, detail="Invalid project file path")
     with SessionLocal() as session:
         project = session.get(Project, project_id)
@@ -453,19 +538,55 @@ def preview_project_file(
         current = candidate
         while current != root:
             if current.is_symlink():
-                raise HTTPException(status_code=404, detail="Project file is unavailable")
+                raise HTTPException(
+                    status_code=404, detail="Project file is unavailable"
+                )
             current = current.parent
         try:
             resolved = candidate.resolve(strict=True)
-            if not resolved.is_relative_to(root) or not resolved.is_file() or resolved.stat().st_size > 1_000_000:
+            if (
+                not resolved.is_relative_to(root)
+                or not resolved.is_file()
+                or resolved.stat().st_size > 1_000_000
+            ):
                 raise OSError("File is unavailable or too large")
             content = resolved.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
-            raise HTTPException(status_code=404, detail="Файл недоступен для текстового просмотра (лимит 1 MiB).") from exc
+            raise HTTPException(
+                status_code=404,
+                detail="Файл недоступен для текстового просмотра (лимит 1 MiB).",
+            ) from exc
         lines = content.splitlines()
         safe_name = not _project_path_is_sensitive(relative)
-        editable_suffixes = {".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css", ".scss", ".json", ".yaml", ".yml", ".toml", ".ini", ".md", ".txt", ".xml", ".gradle", ".kts", ".properties", ".sql", ".sh", ".ps1"}
-        editable = safe_name and relative.suffix.lower() in editable_suffixes and _project_content_is_safe(content)
+        editable_suffixes = {
+            ".py",
+            ".js",
+            ".jsx",
+            ".ts",
+            ".tsx",
+            ".html",
+            ".css",
+            ".scss",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".toml",
+            ".ini",
+            ".md",
+            ".txt",
+            ".xml",
+            ".gradle",
+            ".kts",
+            ".properties",
+            ".sql",
+            ".sh",
+            ".ps1",
+        }
+        editable = (
+            safe_name
+            and relative.suffix.lower() in editable_suffixes
+            and _project_content_is_safe(content)
+        )
         first = min(start_line, max(1, len(lines)))
         last = min(len(lines), first + 299)
         return {
@@ -475,7 +596,10 @@ def preview_project_file(
             "total_lines": len(lines),
             "editable": editable,
             "content": content if editable else None,
-            "lines": [{"line": number, "text": _redact(lines[number - 1])[:1000]} for number in range(first, last + 1)],
+            "lines": [
+                {"line": number, "text": _redact(lines[number - 1])[:1000]}
+                for number in range(first, last + 1)
+            ],
         }
 
 
@@ -660,41 +784,103 @@ def preview_project_asset(
 
 
 @app.put("/api/projects/{project_id}/file")
-def update_project_file(project_id: UUID, payload: ProjectFileUpdate, path: str = Query(min_length=1, max_length=1000)):
+def update_project_file(
+    project_id: UUID,
+    payload: ProjectFileUpdate,
+    path: str = Query(min_length=1, max_length=1000),
+):
     relative = PurePosixPath(path)
-    if relative.is_absolute() or "\\" in path or "\x00" in path or any(part in {"", ".", ".."} for part in relative.parts):
+    if (
+        relative.is_absolute()
+        or "\\" in path
+        or "\x00" in path
+        or any(part in {"", ".", ".."} for part in relative.parts)
+    ):
         raise HTTPException(status_code=400, detail="Invalid project file path")
-    if relative.suffix.lower() not in {".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css", ".scss", ".json", ".yaml", ".yml", ".toml", ".ini", ".md", ".txt", ".xml", ".gradle", ".kts", ".properties", ".sql", ".sh", ".ps1"}:
-        raise HTTPException(status_code=415, detail="Этот тип файла нельзя редактировать в браузере.")
+    if relative.suffix.lower() not in {
+        ".py",
+        ".js",
+        ".jsx",
+        ".ts",
+        ".tsx",
+        ".html",
+        ".css",
+        ".scss",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".ini",
+        ".md",
+        ".txt",
+        ".xml",
+        ".gradle",
+        ".kts",
+        ".properties",
+        ".sql",
+        ".sh",
+        ".ps1",
+    }:
+        raise HTTPException(
+            status_code=415, detail="Этот тип файла нельзя редактировать в браузере."
+        )
     if _project_path_is_sensitive(relative):
-        raise HTTPException(status_code=403, detail="Файлы с потенциальными секретами доступны только для чтения.")
+        raise HTTPException(
+            status_code=403,
+            detail="Файлы с потенциальными секретами доступны только для чтения.",
+        )
     if len(payload.content.encode("utf-8")) > 1_000_000:
-        raise HTTPException(status_code=413, detail="Размер файла после UTF-8 кодирования превышает 1 MiB.")
+        raise HTTPException(
+            status_code=413,
+            detail="Размер файла после UTF-8 кодирования превышает 1 MiB.",
+        )
     if not _project_content_is_safe(payload.content):
-        raise HTTPException(status_code=400, detail="Сохранение отменено: содержимое похоже на секрет или учётные данные.")
+        raise HTTPException(
+            status_code=400,
+            detail="Сохранение отменено: содержимое похоже на секрет или учётные данные.",
+        )
     with SessionLocal() as session:
         project = session.get(Project, project_id)
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
         if _project_has_active_run(session, project):
-            raise HTTPException(status_code=409, detail="Проект используется активным workflow; редактирование временно заблокировано.")
+            raise HTTPException(
+                status_code=409,
+                detail="Проект используется активным workflow; редактирование временно заблокировано.",
+            )
         root = _project_root(project)
         candidate = root.joinpath(*relative.parts)
         current = candidate
         while current != root:
             if current.is_symlink():
-                raise HTTPException(status_code=404, detail="Project file is unavailable")
+                raise HTTPException(
+                    status_code=404, detail="Project file is unavailable"
+                )
             current = current.parent
         try:
             resolved = candidate.resolve(strict=True)
-            if not resolved.is_relative_to(root) or not resolved.is_file() or resolved.stat().st_size > 1_000_000:
+            if (
+                not resolved.is_relative_to(root)
+                or not resolved.is_file()
+                or resolved.stat().st_size > 1_000_000
+            ):
                 raise OSError("File is unavailable or too large")
             original = resolved.read_text(encoding="utf-8")
             if not _project_content_is_safe(original):
-                raise HTTPException(status_code=403, detail="Файл содержит потенциальные секреты и доступен только для чтения.")
+                raise HTTPException(
+                    status_code=403,
+                    detail="Файл содержит потенциальные секреты и доступен только для чтения.",
+                )
             temp_name = None
             try:
-                with tempfile.NamedTemporaryFile("w", encoding="utf-8", newline="", dir=resolved.parent, prefix=".invest-edit-", delete=False) as temporary:
+                with tempfile.NamedTemporaryFile(
+                    "w",
+                    encoding="utf-8",
+                    newline="",
+                    dir=resolved.parent,
+                    prefix=".invest-edit-",
+                    delete=False,
+                ) as temporary:
                     temp_name = temporary.name
                     temporary.write(payload.content)
                     temporary.flush()
@@ -706,18 +892,58 @@ def update_project_file(project_id: UUID, payload: ProjectFileUpdate, path: str 
         except HTTPException:
             raise
         except (OSError, UnicodeDecodeError) as exc:
-            raise HTTPException(status_code=400, detail="Не удалось сохранить файл. Проверь размер и кодировку UTF-8.") from exc
-        session.add(AuditLog(action="project.file_updated", entity="project", entity_id=str(project_id), details={
-            "path": relative.as_posix(), "bytes": len(payload.content.encode("utf-8"))
-        }))
+            raise HTTPException(
+                status_code=400,
+                detail="Не удалось сохранить файл. Проверь размер и кодировку UTF-8.",
+            ) from exc
+        session.add(
+            AuditLog(
+                action="project.file_updated",
+                entity="project",
+                entity_id=str(project_id),
+                details={
+                    "path": relative.as_posix(),
+                    "bytes": len(payload.content.encode("utf-8")),
+                },
+            )
+        )
         session.commit()
-    return {"saved": True, "path": relative.as_posix(), "bytes": len(payload.content.encode("utf-8"))}
+    return {
+        "saved": True,
+        "path": relative.as_posix(),
+        "bytes": len(payload.content.encode("utf-8")),
+    }
 
 
 @app.get("/api/projects/{project_id}/search")
-def search_project_contents(project_id: UUID, q: str = Query(min_length=2, max_length=100)):
+def search_project_contents(
+    project_id: UUID, q: str = Query(min_length=2, max_length=100)
+):
     needle = q.casefold()
-    text_suffixes = {".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css", ".scss", ".json", ".yaml", ".yml", ".toml", ".ini", ".md", ".txt", ".xml", ".gradle", ".kts", ".properties", ".sql", ".sh", ".ps1"}
+    text_suffixes = {
+        ".py",
+        ".js",
+        ".jsx",
+        ".ts",
+        ".tsx",
+        ".html",
+        ".css",
+        ".scss",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".ini",
+        ".md",
+        ".txt",
+        ".xml",
+        ".gradle",
+        ".kts",
+        ".properties",
+        ".sql",
+        ".sh",
+        ".ps1",
+    }
     results = []
     scanned = 0
     with SessionLocal() as session:
@@ -726,12 +952,22 @@ def search_project_contents(project_id: UUID, q: str = Query(min_length=2, max_l
             raise HTTPException(status_code=404, detail="Project not found")
         root = _project_root(project)
         for current, directories, filenames in os.walk(root, followlinks=False):
-            directories[:] = [name for name in directories if name != ".git" and not (Path(current) / name).is_symlink()]
+            directories[:] = [
+                name
+                for name in directories
+                if name != ".git" and not (Path(current) / name).is_symlink()
+            ]
             for filename in filenames:
                 if scanned >= 3000 or len(results) >= 100:
                     break
                 item = Path(current) / filename
-                if item.is_symlink() or item.suffix.lower() not in text_suffixes or _project_path_is_sensitive(PurePosixPath(item.relative_to(root).as_posix())):
+                if (
+                    item.is_symlink()
+                    or item.suffix.lower() not in text_suffixes
+                    or _project_path_is_sensitive(
+                        PurePosixPath(item.relative_to(root).as_posix())
+                    )
+                ):
                     continue
                 try:
                     if item.stat().st_size > 512_000:
@@ -742,12 +978,22 @@ def search_project_contents(project_id: UUID, q: str = Query(min_length=2, max_l
                 scanned += 1
                 for number, line in enumerate(content.splitlines(), 1):
                     if needle in line.casefold() and _redact(line) == line:
-                        results.append({"path": item.relative_to(root).as_posix(), "line": number, "text": line.strip()[:240]})
+                        results.append(
+                            {
+                                "path": item.relative_to(root).as_posix(),
+                                "line": number,
+                                "text": line.strip()[:240],
+                            }
+                        )
                         if len(results) >= 100:
                             break
             if scanned >= 3000 or len(results) >= 100:
                 break
-    return {"results": results, "scanned_files": scanned, "truncated": len(results) >= 100 or scanned >= 3000}
+    return {
+        "results": results,
+        "scanned_files": scanned,
+        "truncated": len(results) >= 100 or scanned >= 3000,
+    }
 
 
 @app.get("/api/node-types")
@@ -763,9 +1009,16 @@ def validate_workflow(graph: WorkflowGraph):
 @app.get("/api/workflows")
 def list_workflows():
     with SessionLocal() as session:
-        rows = session.scalars(select(Workflow).order_by(Workflow.updated_at.desc())).all()
+        rows = session.scalars(
+            select(Workflow).order_by(Workflow.updated_at.desc())
+        ).all()
         return [
-            {"id": str(item.id), "name": item.name, "description": item.description, "updated_at": item.updated_at}
+            {
+                "id": str(item.id),
+                "name": item.name,
+                "description": item.description,
+                "updated_at": item.updated_at,
+            }
             for item in rows
         ]
 
@@ -779,7 +1032,11 @@ def create_workflow(graph: WorkflowGraph):
         workflow = Workflow(name=graph.name)
         session.add(workflow)
         session.flush()
-        session.add(WorkflowVersion(workflow_id=workflow.id, version=1, graph=graph.model_dump(mode="json")))
+        session.add(
+            WorkflowVersion(
+                workflow_id=workflow.id, version=1, graph=graph.model_dump(mode="json")
+            )
+        )
         session.commit()
         return {"id": str(workflow.id), "name": workflow.name, "version": 1}
 
@@ -821,7 +1078,13 @@ def update_workflow(workflow_id: UUID, graph: WorkflowGraph):
         )
         version = (latest.version if latest else 0) + 1
         workflow.name = graph.name
-        session.add(WorkflowVersion(workflow_id=workflow_id, version=version, graph=graph.model_dump(mode="json")))
+        session.add(
+            WorkflowVersion(
+                workflow_id=workflow_id,
+                version=version,
+                graph=graph.model_dump(mode="json"),
+            )
+        )
         session.commit()
         return {"id": str(workflow.id), "name": workflow.name, "version": version}
 
@@ -1039,7 +1302,9 @@ def list_workflow_runs(workflow_id: UUID):
         if session.get(Workflow, workflow_id) is None:
             raise HTTPException(status_code=404, detail="Workflow not found")
         rows = session.scalars(
-            select(WorkflowRun).where(WorkflowRun.workflow_id == workflow_id).order_by(WorkflowRun.queued_at.desc())
+            select(WorkflowRun)
+            .where(WorkflowRun.workflow_id == workflow_id)
+            .order_by(WorkflowRun.queued_at.desc())
         ).all()
         return [
             {
@@ -1298,10 +1563,18 @@ def _run_telemetry(session, run: WorkflowRun):
 
     result = run.result if isinstance(run.result, dict) else {}
     trace = result.get("trace", []) if isinstance(result, dict) else []
+<<<<<<< Updated upstream
     progress = result if run.status in {"running", "cancelling"} and "completed_nodes" in result else None
+=======
+    progress = (
+        result if run.status == "running" and "completed_nodes" in result else None
+    )
+>>>>>>> Stashed changes
     if progress:
         severity = progress.get("severity", severity)
-    total_findings = progress.get("total_findings", len(findings)) if progress else len(findings)
+    total_findings = (
+        progress.get("total_findings", len(findings)) if progress else len(findings)
+    )
     now = datetime.now(timezone.utc)
     duration_ms = None
     if run.started_at:
@@ -1334,15 +1607,24 @@ def _run_telemetry(session, run: WorkflowRun):
         "scanners": scanners,
         "cache": _cache_telemetry_summary(trace),
         "trace": trace,
-        "completed_nodes": progress.get("completed_nodes", len(trace)) if progress else len(trace),
-        "total_nodes": progress.get("total_nodes", len(run.graph_snapshot.get("nodes", []))) if progress else len(run.graph_snapshot.get("nodes", [])),
+        "completed_nodes": (
+            progress.get("completed_nodes", len(trace)) if progress else len(trace)
+        ),
+        "total_nodes": (
+            progress.get("total_nodes", len(run.graph_snapshot.get("nodes", [])))
+            if progress
+            else len(run.graph_snapshot.get("nodes", []))
+        ),
         "current_node": progress.get("current_node") if progress else None,
         "scanner_progress": progress.get("scanner_progress") if progress else None,
         "node_results": (
-            progress.get("node_results", {}) if progress else {
+            progress.get("node_results", {})
+            if progress
+            else {
                 node_id: {
                     "status": output.get("status"),
                     **({"message": output["message"]} if output.get("message") else {}),
+<<<<<<< Updated upstream
                     **({"findings": output["summary"]["total"]} if isinstance(output.get("summary"), dict) else {}),
                     **({
                         "explained_count": output.get("explained_count", len(output.get("explanations", []))),
@@ -1355,13 +1637,62 @@ def _run_telemetry(session, run: WorkflowRun):
                     } if node_id in {item.get("node_id") for item in trace if item.get("type") == "ai.explain"} else {}),
                     **({"total_findings": len(output.get("findings", []))} if node_id in {item.get("node_id") for item in trace if item.get("type") == "ai.explain"} else {}),
                     **({"explanations": [
+=======
+                    **(
+                        {"findings": output["summary"]["total"]}
+                        if isinstance(output.get("summary"), dict)
+                        else {}
+                    ),
+                    **(
+>>>>>>> Stashed changes
                         {
-                            "root_cause": str(item.get("root_cause", ""))[:240],
-                            "impact": str(item.get("impact", ""))[:180],
-                            "recommendation": str(item.get("recommendation", ""))[:240],
-                        } for item in output.get("explanations", [])[:3]
-                    ]} if node_id in {item.get("node_id") for item in trace if item.get("type") == "ai.explain"} else {}),
-                } for node_id, output in (result.get("outputs", {}) if isinstance(result, dict) else {}).items()
+                            "explained_count": output.get(
+                                "explained_count", len(output.get("explanations", []))
+                            )
+                        }
+                        if node_id
+                        in {
+                            item.get("node_id")
+                            for item in trace
+                            if item.get("type") == "ai.explain"
+                        }
+                        else {}
+                    ),
+                    **(
+                        {"total_findings": len(output.get("findings", []))}
+                        if node_id
+                        in {
+                            item.get("node_id")
+                            for item in trace
+                            if item.get("type") == "ai.explain"
+                        }
+                        else {}
+                    ),
+                    **(
+                        {
+                            "explanations": [
+                                {
+                                    "root_cause": str(item.get("root_cause", ""))[:240],
+                                    "impact": str(item.get("impact", ""))[:180],
+                                    "recommendation": str(
+                                        item.get("recommendation", "")
+                                    )[:240],
+                                }
+                                for item in output.get("explanations", [])[:3]
+                            ]
+                        }
+                        if node_id
+                        in {
+                            item.get("node_id")
+                            for item in trace
+                            if item.get("type") == "ai.explain"
+                        }
+                        else {}
+                    ),
+                }
+                for node_id, output in (
+                    result.get("outputs", {}) if isinstance(result, dict) else {}
+                ).items()
             }
         ),
         "security_gate": result.get("security_gate"),
@@ -1381,7 +1712,12 @@ def latest_workflow_telemetry(workflow_id: UUID):
             .limit(1)
         )
         if run is None:
-            return {"status": "never_run", "total_findings": 0, "severity": {}, "scanners": []}
+            return {
+                "status": "never_run",
+                "total_findings": 0,
+                "severity": {},
+                "scanners": [],
+            }
         return _run_telemetry(session, run)
 
 
@@ -1604,7 +1940,9 @@ def list_run_findings(run_id: UUID):
         if session.get(WorkflowRun, run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         rows = session.scalars(
-            select(Finding).where(Finding.run_id == run_id).order_by(Finding.severity, Finding.path, Finding.line)
+            select(Finding)
+            .where(Finding.run_id == run_id)
+            .order_by(Finding.severity, Finding.path, Finding.line)
         ).all()
         return [
             {
@@ -1632,28 +1970,41 @@ def get_finding_source(
         raise HTTPException(status_code=422, detail="Invalid finding fingerprint")
     if start_line is not None and end_line is not None and end_line < start_line:
         raise HTTPException(status_code=422, detail="end_line must be >= start_line")
-    if start_line is not None and end_line is not None and end_line - start_line + 1 > 300:
-        raise HTTPException(status_code=422, detail="Source window is limited to 300 lines")
+    if (
+        start_line is not None
+        and end_line is not None
+        and end_line - start_line + 1 > 300
+    ):
+        raise HTTPException(
+            status_code=422, detail="Source window is limited to 300 lines"
+        )
 
     with SessionLocal() as session:
         run = session.get(WorkflowRun, run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="Run not found")
         finding = session.scalar(
-            select(Finding).where(Finding.run_id == run_id, Finding.fingerprint == fingerprint).limit(1)
+            select(Finding)
+            .where(Finding.run_id == run_id, Finding.fingerprint == fingerprint)
+            .limit(1)
         )
         if finding is None:
             raise HTTPException(status_code=404, detail="Finding not found in this run")
         payload = finding.payload if isinstance(finding.payload, dict) else {}
         try:
             source_file = resolve_run_source_file(
-                settings.workspace_root, run.graph_snapshot, run.result or {}, finding.path
+                settings.workspace_root,
+                run.graph_snapshot,
+                run.result or {},
+                finding.path,
             )
             if source_file.stat().st_size > 1_000_000:
                 raise RunSourceFileError("Source file exceeds the 1 MiB preview limit")
             content = source_file.read_text(encoding="utf-8")
         except (RunSourceFileError, OSError, UnicodeDecodeError) as exc:
-            raise HTTPException(status_code=404, detail="Source file is unavailable for this run") from exc
+            raise HTTPException(
+                status_code=404, detail="Source file is unavailable for this run"
+            ) from exc
 
         lines = content.splitlines()
         total_lines = len(lines)
@@ -1661,13 +2012,19 @@ def get_finding_source(
         first = start_line if start_line is not None else max(1, center - 40)
         last = end_line if end_line is not None else min(total_lines, first + 99)
         if first > max(total_lines, 1):
-            raise HTTPException(status_code=416, detail="Requested source window is outside the file")
+            raise HTTPException(
+                status_code=416, detail="Requested source window is outside the file"
+            )
         last = min(last, first + 299, total_lines)
         redact_entire_file = str(payload.get("category", "")).upper() == "SECRET"
         window = [
             {
                 "line": number,
-                "text": "[REDACTED: secret-bearing source file]" if redact_entire_file else _redact(lines[number - 1])[:1000],
+                "text": (
+                    "[REDACTED: secret-bearing source file]"
+                    if redact_entire_file
+                    else _redact(lines[number - 1])[:1000]
+                ),
                 "is_finding": number == finding.line,
             }
             for number in range(first, last + 1)
@@ -1689,7 +2046,6 @@ def run_workflow(graph: WorkflowGraph):
         return execute_graph(graph, registry)
     except WorkflowExecutionError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-
 
 
 @app.get("/api/workflows/{workflow_id}/finding-states")
@@ -1714,11 +2070,16 @@ def list_finding_states(workflow_id: UUID):
 
 
 @app.put("/api/workflows/{workflow_id}/findings/{fingerprint}/state")
-def update_finding_state(workflow_id: UUID, fingerprint: str, payload: FindingStateUpdate):
+def update_finding_state(
+    workflow_id: UUID, fingerprint: str, payload: FindingStateUpdate
+):
     if not fingerprint or len(fingerprint) > 64:
         raise HTTPException(status_code=422, detail="Invalid finding fingerprint")
     if payload.state != "accepted_risk" and payload.expires_at is not None:
-        raise HTTPException(status_code=422, detail="Срок действия допускается только для accepted_risk.")
+        raise HTTPException(
+            status_code=422,
+            detail="Срок действия допускается только для accepted_risk.",
+        )
 
     with SessionLocal() as session:
         if session.get(Workflow, workflow_id) is None:
@@ -1726,11 +2087,16 @@ def update_finding_state(workflow_id: UUID, fingerprint: str, payload: FindingSt
         finding = session.scalar(
             select(Finding)
             .join(WorkflowRun, Finding.run_id == WorkflowRun.id)
-            .where(WorkflowRun.workflow_id == workflow_id, Finding.fingerprint == fingerprint)
+            .where(
+                WorkflowRun.workflow_id == workflow_id,
+                Finding.fingerprint == fingerprint,
+            )
             .limit(1)
         )
         if finding is None:
-            raise HTTPException(status_code=404, detail="Finding not found in this workflow")
+            raise HTTPException(
+                status_code=404, detail="Finding not found in this workflow"
+            )
 
         state_row = session.scalar(
             select(FindingState).where(
@@ -1753,19 +2119,23 @@ def update_finding_state(workflow_id: UUID, fingerprint: str, payload: FindingSt
             state_row.reason = payload.reason
             state_row.expires_at = payload.expires_at
 
-        session.add(AuditLog(
-            action="finding.state.changed",
-            entity="finding_state",
-            entity_id=f"{workflow_id}:{fingerprint}",
-            details={
-                "workflow_id": str(workflow_id),
-                "fingerprint": fingerprint,
-                "previous_state": previous_state,
-                "new_state": payload.state,
-                "reason": payload.reason,
-                "expires_at": payload.expires_at.isoformat() if payload.expires_at else None,
-            },
-        ))
+        session.add(
+            AuditLog(
+                action="finding.state.changed",
+                entity="finding_state",
+                entity_id=f"{workflow_id}:{fingerprint}",
+                details={
+                    "workflow_id": str(workflow_id),
+                    "fingerprint": fingerprint,
+                    "previous_state": previous_state,
+                    "new_state": payload.state,
+                    "reason": payload.reason,
+                    "expires_at": (
+                        payload.expires_at.isoformat() if payload.expires_at else None
+                    ),
+                },
+            )
+        )
         session.commit()
         return {
             "fingerprint": fingerprint,

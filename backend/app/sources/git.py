@@ -28,7 +28,9 @@ def _canonical_https_url(value: str) -> str:
             or parsed.query
             or parsed.fragment
         ):
-            raise GitSourceError("Only credential-free HTTPS repository URLs are supported")
+            raise GitSourceError(
+                "Only credential-free HTTPS repository URLs are supported"
+            )
         if not parsed.path or parsed.path == "/":
             raise GitSourceError("Repository URL must include an owner and repository")
         path = parsed.path.rstrip("/")
@@ -77,16 +79,25 @@ def clone_allowed_repository(
     disabled_hooks = root / ".git-hooks-disabled"
     args = [
         "git",
-        "-c", f"core.hooksPath={disabled_hooks}",
-        "-c", "core.fsmonitor=false",
-        "-c", "core.autocrlf=false",
-        "-c", "protocol.file.allow=never",
-        "-c", "submodule.recurse=false",
-        "-c", "http.followRedirects=false",
-        "-c", "filter.lfs.smudge=",
-        "-c", "filter.lfs.process=",
+        "-c",
+        f"core.hooksPath={disabled_hooks}",
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.autocrlf=false",
+        "-c",
+        "protocol.file.allow=never",
+        "-c",
+        "submodule.recurse=false",
+        "-c",
+        "http.followRedirects=false",
+        "-c",
+        "filter.lfs.smudge=",
+        "-c",
+        "filter.lfs.process=",
         "clone",
-        "--depth", "1",
+        "--depth",
+        "1",
         "--single-branch",
         "--no-tags",
         "--no-recurse-submodules",
@@ -134,7 +145,9 @@ def clone_allowed_repository(
         raise GitSourceError("Git clone exceeded the 120-second time limit") from exc
     except OSError as exc:
         shutil.rmtree(destination, ignore_errors=True)
-        raise GitSourceError("Git executable is unavailable or could not start") from exc
+        raise GitSourceError(
+            "Git executable is unavailable or could not start"
+        ) from exc
     except Exception:
         shutil.rmtree(destination, ignore_errors=True)
         raise
